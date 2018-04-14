@@ -128,7 +128,9 @@ StatefulTranslator64::translate46(Packet *p, const click_ip *v4l3h, const click_
 	ip6->ip6_hlim = v4l3h->ip_ttl + 0x40-0xff;
 	//Translate IP addresses
 	//Append a WKP prefix to the v4 address and construct the embedded v6 address
-	ip6->ip6_src = IP6Address("64:ff9b::"+IPAddress(v4l3h->ip_src).unparse());
+	ip6->ip6_src.__in6_u.__u6_addr32[0] = htonl(0x0064ff9b);
+	ip6->ip6_src.__in6_u.__u6_addr32[3] = v4l3h->ip_src.s_addr;
+
 	ip6->ip6_dst = addressAndPort->mappedAddress._v6;
 	SET_DST_IP6_ANNO(wp,ip6->ip6_dst);
 
@@ -175,8 +177,6 @@ StatefulTranslator64::sixToFour(Packet *p){
 	click_tcp *tcph = (click_tcp *)(p->data()+40);
 	IP6Address ip6_src = IP6Address(ip6h->ip6_src);
 	IP6Address ip6_dst = IP6Address(ip6h->ip6_dst);
-	String src= ip6_src.unparse_expanded();
-	String dst= ip6_dst.unparse_expanded();
 
 	if (ip6_dst.has_wellKnown_prefix()) {
 		uint16_t sport = tcph->th_sport;
