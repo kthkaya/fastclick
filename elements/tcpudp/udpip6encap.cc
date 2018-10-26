@@ -86,6 +86,29 @@ UDPIP6Encap::configure(Vector<String> &conf, ErrorHandler *errh)
     return 0;
 }
 
+int
+UDPIP6Encap::getSaddr()
+{
+	return ntohl(_saddr.s6_addr32[3]);
+}
+
+void
+UDPIP6Encap::setSaddr(int last4octets)
+{
+	_saddr.s6_addr32[3]=htonl(last4octets);
+}
+
+static int
+UDPIP6Encap_incrSaddr_write_handler
+(const String &s, Element *e, void *, ErrorHandler *errh)
+{
+  UDPIP6Encap *c = (UDPIP6Encap *)e;
+  int incremendtedAddr =c->getSaddr()+1;
+  c->setSaddr(incremendtedAddr);
+
+  return 0;
+}
+
 Packet *
 UDPIP6Encap::simple_action(Packet *p_in)
 {
@@ -160,6 +183,7 @@ void UDPIP6Encap::add_handlers()
     add_write_handler("dst", reconfigure_keyword_handler, "2 DST");
     add_read_handler("dport", read_handler, 3);
     add_write_handler("dport", reconfigure_keyword_handler, "3 DPORT");
+    add_write_handler("incr_saddr", UDPIP6Encap_incrSaddr_write_handler, 0);
 }
 
 CLICK_ENDDECLS
