@@ -78,12 +78,22 @@ class UDPIP6Encap : public BatchElement { public:
     uint16_t _sport;
     uint16_t _dport;
     bool _use_dst_anno;
+
+  public:
+    void setSaddr(int last4octets);
+    int getSaddr();
+
 #if HAVE_FAST_CHECKSUM && FAST_CHECKSUM_ALIGNED
     bool _aligned;
     bool _checked_aligned;
 #endif
 
     static String read_handler(Element *, void *) CLICK_COLD;
+
+#if 0
+  friend int UDPIP6Encap_incrSaddr_write_handler
+    (const String &, Element *e, void *, ErrorHandler *);
+#endif
 
 
 };
