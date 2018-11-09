@@ -1,10 +1,11 @@
 // -*- c-basic-offset: 4; related-file-name: "fromdpdkdevice.hh" -*-
 /*
  * fromdpdkdevice.{cc,hh} -- element reads packets live from network via
- * Intel's DPDK
+ * the DPDK.
  *
  * Copyright (c) 2014-2015 Cyril Soldani, University of Liège
- * Copyright (c) 2016 Tom Barbette, University of Liège
+ * Copyright (c) 2016-2017 Tom Barbette, University of Liège
+ * Copyright (c) 2017 Georgios Katsikas, RISE SICS
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -30,13 +31,13 @@
 CLICK_DECLS
 
 FromDPDKDevice::FromDPDKDevice() :
-    _dev(0), _active(true)
+    _dev(0)
 {
-	#if HAVE_BATCH
-		in_batch_mode = BATCH_MODE_YES;
-	#endif
-	_burst = 32;
-	ndesc = DPDKDevice::DEF_DEV_RXDESC;
+#if HAVE_BATCH
+    in_batch_mode = BATCH_MODE_YES;
+#endif
+    _burst = 32;
+    ndesc = 0;
 }
 
 FromDPDKDevice::~FromDPDKDevice()
@@ -50,14 +51,25 @@ int FromDPDKDevice::configure(Vector<String> &conf, ErrorHandler *errh)
     int maxqueues = 128;
     String dev;
     EtherAddress mac;
+    uint16_t mtu = 0;
     bool has_mac = false;
+    bool has_mtu = false;
+    FlowControlMode fc_mode(FC_UNSET);
 
-    if (parse(Args(conf, this, errh)
-        .read_mp("PORT", dev))
+    if (Args(this, errh).bind(conf)
+        .read_mp("PORT", dev)
+        .consume() < 0)
+        return -1;
+
+    if (parse(conf, errh) != 0)
+        return -1;
+
+    if (Args(conf, this, errh)
         .read("NDESC", ndesc)
         .read("MAC", mac).read_status(has_mac)
+        .read("MTU", mtu).read_status(has_mtu)
         .read("MAXQUEUES",maxqueues)
-        .read("ACTIVE", _active)
+        .read("PAUSE", fc_mode)
         .complete() < 0)
         return -1;
 
@@ -65,7 +77,7 @@ int FromDPDKDevice::configure(Vector<String> &conf, ErrorHandler *errh)
         if (allow_nonexistent)
             return 0;
         else
-            return errh->error("%s : Unknown or invalid PORT", dev.c_str());
+            return errh->error("%s: Unknown or invalid PORT", dev.c_str());
     }
 
     if (_use_numa) {
@@ -74,23 +86,30 @@ int FromDPDKDevice::configure(Vector<String> &conf, ErrorHandler *errh)
 
     int r;
     if (n_queues == -1) {
-	if (firstqueue == -1) {
-		firstqueue = 0;
-		//With DPDK we'll take as many queues as available threads
-		 r = configure_rx(numa_node,1,maxqueues,errh);
-	} else {
-		//If a queue number is setted, user probably want only one queue
-		r = configure_rx(numa_node,1,1,errh);
-	}
+    if (firstqueue == -1) {
+        firstqueue = 0;
+        // With DPDK we'll take as many queues as available threads
+        r = configure_rx(numa_node, 1, maxqueues, errh);
+    } else {
+        // If a queue number is set, user probably wants only one queue
+        r = configure_rx(numa_node, 1, 1, errh);
+    }
     } else {
         if (firstqueue == -1)
             firstqueue = 0;
-        r = configure_rx(numa_node,n_queues,n_queues,errh);
+        r = configure_rx(numa_node, n_queues, n_queues, errh);
     }
-    if (r != 0) return r;
+    if (r != 0)
+        return r;
 
     if (has_mac)
-        _dev->set_mac(mac);
+        _dev->set_init_mac(mac);
+
+    if (has_mtu)
+        _dev->set_init_mtu(mtu);
+
+    if (fc_mode != FC_UNSET)
+        _dev->set_init_fc_mode(fc_mode);
 
     return 0;
 }
@@ -105,7 +124,7 @@ int FromDPDKDevice::initialize(ErrorHandler *errh)
     ret = initialize_rx(errh);
     if (ret != 0) return ret;
 
-    for (unsigned i = firstqueue; i <= lastqueue; i++) {
+    for (unsigned i = (unsigned)firstqueue; i <= (unsigned)lastqueue; i++) {
         ret = _dev->add_rx_queue(i , _promisc, ndesc, errh);
         if (ret != 0) return ret;
     }
@@ -131,7 +150,7 @@ int FromDPDKDevice::initialize(ErrorHandler *errh)
 
 void FromDPDKDevice::cleanup(CleanupStage)
 {
-	cleanup_tasks();
+    cleanup_tasks();
 }
 
 bool FromDPDKDevice::run_task(Task *t)
@@ -150,7 +169,7 @@ bool FromDPDKDevice::run_task(Task *t)
             unsigned char* data = rte_pktmbuf_mtod(pkts[i], unsigned char *);
             rte_prefetch0(data);
 #if CLICK_PACKET_USE_DPDK
-            WritablePacket *p = Packet::make(pkts[i]);
+            WritablePacket *p = static_cast<WritablePacket*>(Packet::make(pkts[i]));
 #elif HAVE_ZEROCOPY
             WritablePacket *p = Packet::make(data,
                      rte_pktmbuf_data_len(pkts[i]),
@@ -173,6 +192,9 @@ bool FromDPDKDevice::run_task(Task *t)
 #else
                 SET_AGGREGATE_ANNO(p,pkts[i]->pkt.hash.rss);
 #endif
+            if (_set_paint_anno) {
+                SET_PAINT_ANNO(p, iqueue);
+            }
 #if HAVE_BATCH
             if (head == NULL)
                 head = PacketBatch::start_head(p);
@@ -216,6 +238,16 @@ String FromDPDKDevice::read_handler(Element *e, void * thunk)
                   return "undefined";
               else
                   return String((int) fd->_dev->port_id);
+        case h_nb_rx_queues:
+            return String(fd->_dev->nbRXQueues());
+        case h_nb_tx_queues:
+            return String(fd->_dev->nbTXQueues());
+        case h_mtu: {
+            uint16_t mtu;
+            if (rte_eth_dev_get_mtu(fd->_dev->port_id, &mtu) != 0)
+                return String("<error>");
+            return String(mtu);
+                    }
         case h_mac: {
             if (!fd->_dev)
                 return String::make_empty();
@@ -280,11 +312,12 @@ String FromDPDKDevice::statistics_handler(Element *e, void *thunk)
             return String(stats.imissed);
         case h_ierrors:
             return String(stats.ierrors);
+        case h_nombufs:
+            return String(stats.rx_nombuf);
+        default:
+            return "<unknown>";
     }
-
-    return 0;
 }
-
 
 int FromDPDKDevice::write_handler(
         const String &input, Element *e, void *thunk, ErrorHandler *errh) {
@@ -307,7 +340,7 @@ int FromDPDKDevice::write_handler(
                 reinterpret_cast<ether_addr*>(mac.data()), pool
             );
             if (ret != 0) {
-                return errh->error("Could not add mac address !");
+                return errh->error("Could not add mac address!");
             }
             return 0;
         }
@@ -335,47 +368,66 @@ int FromDPDKDevice::write_handler(
 
 
 int FromDPDKDevice::xstats_handler(
-        int operation, String& input, Element* e,
-        const Handler *handler, ErrorHandler* errh) {
+        int operation, String &input, Element *e,
+        const Handler *handler, ErrorHandler *errh) {
     FromDPDKDevice *fd = static_cast<FromDPDKDevice *>(e);
     if (!fd->_dev)
         return -1;
 
-        struct rte_eth_xstat_name* names;
-#if RTE_VERSION >= RTE_VERSION_NUM(16,07,0,0)
-        int len = rte_eth_xstats_get_names(fd->_dev->port_id, 0, 0);
-        names = static_cast<struct rte_eth_xstat_name*>(
-            malloc(sizeof(struct rte_eth_xstat_name) * len)
-        );
-        rte_eth_xstats_get_names(fd->_dev->port_id,names,len);
-        struct rte_eth_xstat* xstats;
-        xstats = static_cast<struct rte_eth_xstat*>(malloc(
-            sizeof(struct rte_eth_xstat) * len)
-        );
-        rte_eth_xstats_get(fd->_dev->port_id,xstats,len);
-        if (input == "") {
-            StringAccum acc;
-            for (int i = 0; i < len; i++) {
-                acc << names[i].name << "["<<
-                xstats[i].id << "] = " <<
-                xstats[i].value << "\n";
-            }
-
-            input = acc.take_string();
-        } else {
-            for (int i = 0; i < len; i++) {
-                if (strcmp(names[i].name,input.c_str()) == 0) {
-                    input = String(xstats[i].value);
-                    return 0;
+    switch ((intptr_t)handler->read_user_data()) {
+        case h_xstats: {
+            struct rte_eth_xstat_name *names;
+        #if RTE_VERSION >= RTE_VERSION_NUM(16,07,0,0)
+            int len = rte_eth_xstats_get_names(fd->_dev->port_id, 0, 0);
+            names = static_cast<struct rte_eth_xstat_name *>(
+                malloc(sizeof(struct rte_eth_xstat_name) * len)
+            );
+            rte_eth_xstats_get_names(fd->_dev->port_id, names, len);
+            struct rte_eth_xstat *xstats;
+            xstats = static_cast<struct rte_eth_xstat *>(malloc(
+                sizeof(struct rte_eth_xstat) * len)
+            );
+            rte_eth_xstats_get(fd->_dev->port_id,xstats,len);
+            if (input == "") {
+                StringAccum acc;
+                for (int i = 0; i < len; i++) {
+                    acc << names[i].name << "[" <<
+                           xstats[i].id << "] = " <<
+                           xstats[i].value << "\n";
                 }
+
+                input = acc.take_string();
+            } else {
+                for (int i = 0; i < len; i++) {
+                    if (strcmp(names[i].name,input.c_str()) == 0) {
+                        input = String(xstats[i].value);
+                        return 0;
+                    }
+                }
+                return -1;
             }
+            return 0;
+        #else
+            input = "unsupported with DPDK < 16.07";
             return -1;
+        #endif
         }
-#else
-        input = "unsupported with DPDK < 16.07";
-        return -1;
-#endif
-    return 0;
+        case h_queue_count:
+            if (input == "") {
+                StringAccum acc;
+                for (uint16_t i = 0; i < fd->_dev->nbRXQueues(); i++) {
+                    int v = rte_eth_rx_queue_count(fd->_dev->port_id, i);
+                    acc << i << " = " << v << "\n";
+                }
+                input = acc.take_string();
+            } else {
+                int v = rte_eth_rx_queue_count(fd->_dev->port_id, atoi(input.c_str()));
+                input = String(v);
+            }
+            return 0;
+        default:
+            return -1;
+    }
 }
 
 void FromDPDKDevice::add_handlers()
@@ -390,12 +442,16 @@ void FromDPDKDevice::add_handlers()
     add_read_handler("carrier",status_handler, h_carrier);
     add_read_handler("type",status_handler, h_type);
 
-    set_handler("xstats", Handler::f_read | Handler::f_read_param, xstats_handler);
+    set_handler("xstats", Handler::f_read | Handler::f_read_param, xstats_handler, h_xstats);
+    set_handler("queue_count", Handler::f_read | Handler::f_read_param, xstats_handler, h_queue_count);
 
     add_read_handler("active", read_handler, h_active);
     add_write_handler("active", write_handler, h_active);
     add_read_handler("count", count_handler, h_count);
     add_write_handler("reset_counts", reset_count_handler, 0, Handler::BUTTON);
+
+    add_read_handler("nb_rx_queues",read_handler, h_nb_rx_queues);
+    add_read_handler("nb_tx_queues",read_handler, h_nb_tx_queues);
 
     add_read_handler("mac",read_handler, h_mac);
     add_read_handler("vendor", read_handler, h_vendor);
@@ -407,9 +463,9 @@ void FromDPDKDevice::add_handlers()
     add_read_handler("hw_bytes",statistics_handler, h_ibytes);
     add_read_handler("hw_dropped",statistics_handler, h_imissed);
     add_read_handler("hw_errors",statistics_handler, h_ierrors);
+    add_read_handler("nombufs",statistics_handler, h_nombufs);
 
-    add_write_handler("reset_counts", reset_count_handler, 0, Handler::BUTTON);
-
+    add_read_handler("mtu",read_handler, h_mtu);
     add_data_handlers("burst", Handler::h_read | Handler::h_write, &_burst);
 }
 

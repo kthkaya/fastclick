@@ -40,6 +40,7 @@ GTPTable::configure(Vector<String> &conf, ErrorHandler *errh)
 {
     if (Args(conf, this, errh)
             .read_mp("PING_DST",_ping_dst)
+            .read("VERBOSE", _verbose)
 	.complete() < 0)
 	return -1;
 
@@ -183,7 +184,8 @@ GTPTable::process(int port, Packet* p) {
     } else {
         const click_gtp *gtp = reinterpret_cast<const click_gtp *>(p->data() + 28);
         GTPFlowID gtp_out = GTPFlowID(IPFlowID(p,false),ntohl(gtp->gtp_teid));
-        click_chatter("PING RECEIVED, TEID %u",gtp_out.gtp_id);
+        if (_verbose)
+            click_chatter("PING RECEIVED, TEID %u",gtp_out.gtp_id);
         GTPFlowID gtp_in;
 
         const click_ip* innerip = reinterpret_cast<const click_ip*>(gtp + 1);
