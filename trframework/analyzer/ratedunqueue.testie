@@ -1,0 +1,11 @@
+InfiniteSource()
+	-> Queue(10000)
+	-> u1 :: RatedUnqueue(RATE 1000)
+	-> c1 :: AverageCounter
+	-> Discard;
+
+//DriverManager(wait,read counter.count, read counter.rate)
+
+Script(wait 60, read c1.count, read c1.rate, write stop);
+
+

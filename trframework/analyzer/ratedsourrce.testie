@@ -1,0 +1,15 @@
+//--------Program Start----------
+
+rs :: RatedSource(LENGTH 64, RATE 25000, LIMIT 500000, STOP true)
+        -> NumberPacket(OFFSET 0)
+        -> record1 :: RecordTimestamp()
+        -> CheckNumberPacket(OFFSET 0, COUNT 500000)
+        -> diff1 :: TimestampDiff(OFFSET 0, N 500000, RECORDER record1)
+        -> c1 :: Counter()
+        -> Discard;
+
+DriverManager(wait, read diff1.average, read c1.count, read c1.rate)
+
+//--------Program End----------
+
+

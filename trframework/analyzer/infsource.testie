@@ -1,0 +1,17 @@
+//--------Program Start----------
+
+is :: InfiniteSource(LENGTH 64, LIMIT 525000, STOP true)
+        -> Queue(25007)
+        -> RatedUnqueue (RATE 25000)
+        -> NumberPacket(OFFSET 0)
+        -> record :: RecordTimestamp()
+        -> CheckNumberPacket(OFFSET 0, COUNT 500000)
+        -> diff1 :: TimestampDiff(OFFSET 0, N 500000, RECORDER record)
+        -> c1 :: Counter()
+        -> Discard;
+
+DriverManager(wait, read diff1.average, read c1.count, read c1.rate)
+
+//--------Program End----------
+
+
