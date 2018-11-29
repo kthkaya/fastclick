@@ -10,22 +10,24 @@ cd "${0%/*}"
 #7th arg = flows per second
 
 clickFile=$([ $7 == 0 ] && echo "overtheline.click" || echo "overthelinefps.click -j 2 a=18")
+logFile=$([ $7 == 0 ] && echo $6 || echo "fps$7$6")
+
 
 #Packet length 70
 for ((i = 1; i <= $2; i++)); do
-   click $clickFile snkintf=$1 packetlen=8 packetrate=$3 packetcount=$4 chlen=$5 filename=$6 flowspersecond=$7
+   click $clickFile snkintf=$1 packetlen=8 packetrate=$3 packetcount=$4 chlen=$5 filename=$logFile flowspersecond=$7
    sleep 5
 done
 
 #Packet length 512
 for ((i = 1; i <= $2; i++)); do
-   click $clickFile snkintf=$1 packetlen=450 packetrate=$3 packetcount=$4 chlen=$5 filename=$6 flowspersecond=$7
+   click $clickFile snkintf=$1 packetlen=450 packetrate=$3 packetcount=$4 chlen=$5 filename=$logFile flowspersecond=$7
    sleep 5
 done
 
 #Packet length 1500
 for ((i = 1; i <= $2; i++)); do
-   click $clickFile snkintf=$1 packetlen=1438 packetrate=$3 packetcount=$4 chlen=$5 filename=$6 flowspersecond=$7
+   click $clickFile snkintf=$1 packetlen=1438 packetrate=$3 packetcount=$4 chlen=$5 filename=$logFile flowspersecond=$7
    sleep 5
 done
 
