@@ -8,8 +8,11 @@ cd "${0%/*}"
 #5th arg = chain length
 #6th arg = log filename
 #7th arg = flows per second
+#8th arg = reset udpEncap.src to ::1 (True/False)
 
 clickFile=$([ $7 == 0 ] && echo "overtheline.click" || echo "overthelinefps.click -j 2 a=18")
+clickFile=$([[ $7 -gt 0 && $8 -eq 0 ]] && echo "overthelinefpsnoreset.click -j 2 a=18" || echo $clickFile )
+
 logFile=$([ $7 == 0 ] && echo $6 || echo "fps$7$6")
 
 
