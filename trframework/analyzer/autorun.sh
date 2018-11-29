@@ -9,11 +9,11 @@ cd "${0%/*}"
 #6th arg = log filename
 #7th arg = flows per second
 
-clickFile=$([ $7 == 0 ] && echo "overtheline" || echo "overthelinefps")
+clickFile=$([ $7 == 0 ] && echo "overtheline.click" || echo "overthelinefps.click -j 2 a=18")
 
 #Packet length 70
 for ((i = 1; i <= $2; i++)); do
-   click $clickFile.click snkintf=$1 packetlen=8 packetrate=$3 packetcount=$4 chlen=$5 filename=$6 flowspersecond=$7
+   click $clickFile snkintf=$1 packetlen=8 packetrate=$3 packetcount=$4 chlen=$5 filename=$6 flowspersecond=$7
    sleep 5
 done
 
