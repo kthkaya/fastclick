@@ -28,7 +28,7 @@ InfiniteSource(LENGTH $packetlen, LIMIT $packetcount, STOP true)
 
 IN
         -> chnum :: CheckNumberPacket(OFFSET 62, COUNT $packetcount)
-        -> diff :: TimestampDiff(OFFSET 62, N $packetcount, MAXDELAY 2000, RECORDER record)
+        -> diff :: TimestampDiff(OFFSET 62, N $packetcount, MAXDELAY 5000, RECORDER record)
         -> counter :: AverageCounter()
         -> Discard;
 //--------Program End----------
